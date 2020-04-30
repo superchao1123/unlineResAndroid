@@ -2,20 +2,26 @@ package com.example.myapplication.core;
 
 import android.text.TextUtils;
 
-import androidx.annotation.Nullable;
-
+import com.example.myapplication.core.cache.ResFileUtils;
+import com.example.myapplication.core.download.DownloadCallback;
+import com.example.myapplication.core.download.DownloadManager;
 import com.tencent.smtt.export.external.interfaces.WebResourceRequest;
 import com.tencent.smtt.export.external.interfaces.WebResourceResponse;
-import com.tencent.smtt.sdk.WebView;
-import com.tencent.smtt.sdk.WebViewClient;
 
+import java.io.ByteArrayInputStream;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
- * 磁盘存储规则
- * 1.时效：每个资源保存一周
- * 2.位置：
+ * todo
+ * 1、数据库存储？
+ * 2、资源文件时效
+ * 3、单进程 + ipc 策略实现
+ *    预热资源 下载资源到文件 完毕回调主进程 读取磁盘资源到内存
+ * 4、dif资源下载：简易后端搭建、可行性测试、cdn、。。。
+ *
  */
 public class UnLineResManager {
 
@@ -38,84 +44,6 @@ public class UnLineResManager {
 
     // todo lru保存数据
     private Map<String, ResCache> mCacheData;
-
-    public class ResCache {
-
-        String mH5Url;
-        Map<String, CheckResponse> mResList;
-
-        ResCache(String h5Url) {
-            this.mH5Url = h5Url;
-            mResList = new HashMap<>();
-        }
-
-        public void addRes (String resUrl, WebResourceResponse response) {
-            put(resUrl, new CheckResponse(response, 0));
-        }
-
-        public WebResourceResponse getResResponse (String resUrl) {
-            CheckResponse checkResponse = get(resUrl);
-            if (checkResponse != null && checkResponse.isValidity()) {
-                return checkResponse.response;
-            }
-            return null;
-        }
-
-        public void recycle() {
-            if (mResList != null) {
-                mResList.clear();
-                mResList = null;
-            }
-        }
-
-        public void setResInvalidity (String resUrl) {
-            if (TextUtils.isEmpty(resUrl)) {
-                return;
-            }
-            CheckResponse checkResponse = get(resUrl);
-            if (checkResponse == null) {
-                return;
-            }
-            checkResponse.setStatus(1);
-            ResFileUtils.deleteRes(mH5Url, resUrl);
-        }
-
-        boolean hasResData() {
-            return mResList != null && !mResList.isEmpty();
-        }
-
-        public String getH5Url() {
-            return mH5Url;
-        }
-
-        private void put (String url, CheckResponse response) {
-            mResList.put(ResFileUtils.getResDiskName(url), response);
-        }
-
-        private CheckResponse get (String url) {
-            return mResList.get(ResFileUtils.getResDiskName(url));
-        }
-
-        class CheckResponse {
-
-            WebResourceResponse response;
-            int status;
-
-            CheckResponse(WebResourceResponse response, int status) {
-                this.response = response;
-                this.status = status;
-            }
-
-            // 资源是否还在使用
-            boolean isValidity() {
-                return status == 0;
-            }
-
-            public void setStatus(int status) {
-                this.status = status;
-            }
-        }
-    }
 
     /**
      * 预热h5资源
@@ -140,8 +68,6 @@ public class UnLineResManager {
         if (!cached) {
             cacheRes(h5Url);
         }
-
-        cacheRes(h5Url);
     }
 
     /**
@@ -178,12 +104,42 @@ public class UnLineResManager {
     }
 
     private void cacheRes(String h5Url) {
-        ResCache resCache = new ResCache(h5Url);
-        saveCache(resCache.mH5Url, resCache);
-        MyWebViewClient webViewClient = new MyWebViewClient(resCache);
-        WebView webView = WebViewPool.getInstance().getWebView();
-        webView.loadUrl(h5Url);
-        webView.setWebViewClient(webViewClient);
+        final ResCache resCache = new ResCache(h5Url);
+        saveCache(resCache.getH5Url(), resCache);
+        getNeedPreStartResLinks(new GetPreStartLinkCallback() {
+            @Override
+            public void finished(final List<String> links) {
+                if (links != null && !links.isEmpty()) {
+                    DownloadManager.getInstance().load(links, "", "", new DownloadCallback.SimpleDownloadCallback() {
+                        @Override
+                        public void onSuccess(String resUrl, byte[] content, Map<String, List<String>> rspHeaders) {
+                            enjoyResponse(resCache, resUrl, content, rspHeaders);
+                        }
+                    });
+                }
+            }
+        });
+    }
+
+    private void enjoyResponse (ResCache resCache, String resUrl, byte[] content, Map<String, List<String>> rspHeaders) {
+        // 保存到内存
+        WebResourceResponse webResourceResponse = WebResponseTranslator.transform(resUrl, content, rspHeaders);
+        resCache.addRes(resUrl, webResourceResponse);
+        // 保存到磁盘
+        ResFileUtils.writeFile(ResFileUtils.convertHeadersToString(rspHeaders), ResFileUtils.getResResponseHeaderPath(resCache.getH5Url(), resUrl));
+        ResFileUtils.writeToDisk(resUrl, new ByteArrayInputStream(content), resCache);
+    }
+
+    interface GetPreStartLinkCallback {
+        void finished(List<String> links);
+    }
+
+    // TODO: 2020-04-29 获取资源列表
+    private void getNeedPreStartResLinks(GetPreStartLinkCallback callback) {
+        ArrayList<String> list = new ArrayList<>();
+        list.add("http://10.155.31.83:8080/htmldemo/123.html");
+        list.add("http://10.155.31.83:8080/htmldemo/jQuery/jQuery.js");
+        callback.finished(list);
     }
 
     private boolean checkResCacheHeap (String h5Url) {
@@ -212,43 +168,23 @@ public class UnLineResManager {
         return isResCacheDisk;
     }
 
-    class MyWebViewClient extends WebViewClient {
-
-
-        private final ResCache resCache;
-
-        MyWebViewClient(ResCache resCache) {
-            this.resCache = resCache;
-        }
-
-        @Nullable
-        @Override
-        public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-            return loadRes(request);
-        }
-
-        @Nullable
-        @Override
-        public WebResourceResponse shouldInterceptRequest(WebView view, String url) {
-            ResLoadUtils.getInstance().load(url, resCache);
-            return null;
-        }
-
-        private WebResourceResponse loadRes(WebResourceRequest request) {
-            if (request != null) {
-                ResLoadUtils.getInstance().load(request, resCache);
-            }
-            return null;
-        }
-    }
-
     /**
      * 下载资源
      */
-    public void loadRes (String h5Url, WebResourceRequest request) {
+    public void loadRes (final String h5Url, WebResourceRequest request) {
         if (TextUtils.isEmpty(h5Url) || request == null) {
             return;
         }
-        ResLoadUtils.getInstance().load(request, new ResCache(h5Url));
+        DownloadManager.getInstance().load(request.getUrl().toString(), "", "", new DownloadCallback.SimpleDownloadCallback() {
+            @Override
+            public void onSuccess(String resUrl, byte[] content, Map<String, List<String>> rspHeaders) {
+                ResCache resCache = mCacheData.get(h5Url);
+                if (resCache == null) {
+                    resCache = new ResCache(h5Url);
+                    saveCache(h5Url, resCache);
+                }
+                enjoyResponse(resCache, resUrl, content, rspHeaders);
+            }
+        });
     }
 }

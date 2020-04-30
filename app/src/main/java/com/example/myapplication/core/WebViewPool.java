@@ -3,28 +3,27 @@ package com.example.myapplication.core;
 
 import android.app.Application;
 import android.content.Context;
+import android.text.TextUtils;
 import android.view.ViewGroup;
-import com.tencent.smtt.sdk.WebSettings;
+
 import com.tencent.smtt.sdk.WebView;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * webview 复用池
  */
 public class WebViewPool {
 
-    private static final String APP_CACAHE_DIRNAME = "webCache";
-    private static List<WebView> available = new ArrayList<>();
-    private static List<WebView> inUse = new ArrayList<>();
-    private static int maxSize = 2;
-    private int currentSize = 0;
-    private static long startTimes = 0;
-    private static volatile WebViewPool instance = null;
-    private static Context mContext;
 
-    public static WebViewPool getInstance() {
+    private static Map<String, WebView> mH5WebViewHolder;
+    private static final int maxSize = 2;
+    private static volatile WebViewPool instance = null;
+    private Context mContext;
+    private WebView mAvailableWebView;
+
+    public static WebViewPool getInstance () {
         if (instance == null) {
             synchronized (WebViewPool.class) {
                 if (instance == null) {
@@ -35,119 +34,72 @@ public class WebViewPool {
         return instance;
     }
 
-    private WebViewPool() {
-
+    private WebViewPool () {
+        mH5WebViewHolder = new HashMap<>();
     }
 
     /**
      * Webview 初始化
-     * 最好放在application oncreate里
      */
-    public static void init(Application context) {
-        mContext = context;
-        for (int i = 0; i < maxSize; i++) {
-            WebView webView = new WebView(context);
-            initWebSetting(webView);
-            available.add(webView);
+    public void init (Application context) {
+        if (context == null) {
+            throw new IllegalStateException("上下文必须为application，且不能为空！");
         }
+        mContext = context;
+        mAvailableWebView = new WebView(context);
     }
 
     /**
      * 获取webview
      */
-    public WebView getWebView() {
+    public WebView getWebView (String h5Url) {
+        if (mContext == null) {
+            throw new IllegalStateException("必须先进行初始化！");
+        }
+        if (TextUtils.isEmpty(h5Url)) {
+            return null;
+        }
         synchronized (this) {
-            WebView webView;
-            if (available.size() > 0) {
-                webView = available.get(0);
-                available.remove(0);
-                currentSize++;
-                inUse.add(webView);
-            } else {
-                webView = new WebView(mContext);
-                initWebSetting(webView);
-                inUse.add(webView);
-                currentSize++;
+            WebView webView = null;
+            if (mH5WebViewHolder.containsKey(h5Url)) {
+                webView = mH5WebViewHolder.get(h5Url);
             }
+            if (webView == null) {
+                webView = new WebView(mContext);
+                mH5WebViewHolder.put(h5Url, webView);
+            }
+
+            if (webView.getParent() != null) {
+                return new WebView(mContext);
+            }
+            mAvailableWebView = new WebView(mContext);
             return webView;
         }
     }
 
     /**
      * 回收webview ,不解绑
-     *
-     * @param webView 需要被回收的webview
      */
-    public void removeWebView(WebView webView) {
+    public void removeWebView (ViewGroup parent, WebView webView) {
+        if (parent == null || webView == null) {
+            return;
+        }
+        String url = webView.getUrl();
         webView.loadUrl("");
         webView.stopLoading();
         webView.setWebChromeClient(null);
         webView.setWebViewClient(null);
         webView.clearCache(true);
         webView.clearHistory();
+        parent.removeView(webView);
         synchronized (this) {
-            inUse.remove(webView);
-            if (available.size() < maxSize) {
-                available.add(webView);
+            if (mH5WebViewHolder.containsKey(url)) {
+                WebView invalidWebView = mH5WebViewHolder.remove(url);
+                invalidWebView = null;
             } else {
                 webView = null;
             }
-            currentSize--;
         }
-    }
-
-    /**
-     * 回收webview ,解绑
-     *
-     * @param webView 需要被回收的webview
-     */
-    public void removeWebView(ViewGroup viewGroup, WebView webView) {
-        viewGroup.removeView(webView);
-        webView.loadUrl("");
-        webView.stopLoading();
-        webView.setWebChromeClient(null);
-        webView.setWebViewClient(null);
-        webView.clearCache(true);
-        webView.clearHistory();
-        synchronized (this) {
-            inUse.remove(webView);
-            if (available.size() < maxSize) {
-                available.add(webView);
-            } else {
-                webView = null;
-            }
-            currentSize--;
-        }
-    }
-
-    /**
-     * 设置webview池个数
-     *
-     * @param size webview池个数
-     */
-    public void setMaxPoolSize(int size) {
-        synchronized (this) {
-            maxSize = size;
-        }
-    }
-
-    private static void initWebSetting(WebView webView) {
-        WebSettings mWebSettings = webView.getSettings();
-        mWebSettings.setJavaScriptEnabled(true);
-        mWebSettings.setJavaScriptCanOpenWindowsAutomatically(true);
-        mWebSettings.setAllowFileAccess(false);
-        mWebSettings.setPluginState(WebSettings.PluginState.ON);
-        mWebSettings.setCacheMode(WebSettings.LOAD_NO_CACHE);
-        mWebSettings.setSavePassword(false);
-        mWebSettings.setSaveFormData(true);
-        mWebSettings.setDomStorageEnabled(true);
-        mWebSettings.setDatabaseEnabled(true);
-        mWebSettings.setLayoutAlgorithm(WebSettings.LayoutAlgorithm.NARROW_COLUMNS);
-        mWebSettings.setUseWideViewPort(true); // 将图片调整到适合webview的大小
-        mWebSettings.setLoadWithOverviewMode(true); // 缩放至屏幕的大小
-        mWebSettings.setMediaPlaybackRequiresUserGesture(false);// 允许H5的video标签自动播放
-//        String mKooUA = DeviceInfoUtil.getWebViewUA(mWebSettings.getUserAgentString());
-//        mWebSettings.setUserAgentString(mKooUA);
     }
 }
 

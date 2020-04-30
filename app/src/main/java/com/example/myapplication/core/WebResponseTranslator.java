@@ -4,17 +4,20 @@ import android.text.TextUtils;
 
 import com.tencent.smtt.export.external.interfaces.WebResourceResponse;
 
-import java.io.FileInputStream;
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import okhttp3.Headers;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 
-class WebResponseTranslator {
+public class WebResponseTranslator {
 
-    static WebResourceResponse transform(String resUrl, Response response) {
+    public static WebResourceResponse transform(String resUrl, Response response) {
         if (TextUtils.isEmpty(resUrl) || response == null) {
             return null;
         }
@@ -25,14 +28,44 @@ class WebResponseTranslator {
         return transform(resUrl, body.byteStream(), response.headers());
     }
 
-    static WebResourceResponse transform(String resUrl, FileInputStream inputStream) {
-        if (TextUtils.isEmpty(resUrl) || inputStream == null) {
+    public static WebResourceResponse transform(String resUrl, byte[] content, Map<String, List<String>> rspHeaders) {
+        if (TextUtils.isEmpty(resUrl) || content == null) {
             return null;
         }
-        return transform(resUrl, inputStream, null);
+        Headers.Builder builder = null;
+        if (rspHeaders != null && !rspHeaders.isEmpty()) {
+            builder = new Headers.Builder();
+            Set<Map.Entry<String, List<String>>> entries =  rspHeaders.entrySet();
+            for (Map.Entry<String, List<String>> entry : entries) {
+                String key = entry.getKey();
+                if (TextUtils.isEmpty(key)) {
+                    continue;
+                }
+                List<String> values = entry.getValue();
+                if (values == null || values.isEmpty()) {
+                    continue;
+                }
+                StringBuilder headerString = new StringBuilder();
+                for (String value : values) {
+                    if (TextUtils.isEmpty(value)) {
+                        continue;
+                    }
+                    if (headerString.length() != 0) {
+                        headerString.append(";");
+                    }
+                    headerString.append(value);
+                }
+                if (TextUtils.isEmpty(headerString.toString())) {
+                    continue;
+                }
+                builder.add(key, headerString.toString());
+            }
+        }
+        InputStream inputStream = new ByteArrayInputStream(content);
+        return transform(resUrl, inputStream, builder == null ? null : builder.build());
     }
 
-    private static WebResourceResponse transform (String resUrl, InputStream inputStream, Headers headers) {
+    public static WebResourceResponse transform (String resUrl, InputStream inputStream, Headers headers) {
         try {
             WebResourceResponse webResourceResponse = null;
             String mimeType;
