@@ -9,8 +9,9 @@ import android.widget.FrameLayout;
 
 import androidx.annotation.Nullable;
 
-import com.example.myapplication.core.UnLineResManager;
 import com.example.myapplication.core.WebViewPool;
+import com.example.myapplication.core.cs.DataProvider;
+import com.example.myapplication.core.cs.DataRes;
 import com.tencent.smtt.export.external.interfaces.WebResourceRequest;
 import com.tencent.smtt.export.external.interfaces.WebResourceResponse;
 import com.tencent.smtt.sdk.WebView;
@@ -44,12 +45,14 @@ public class WebActivity extends Activity {
         @Nullable
         @Override
         public WebResourceResponse shouldInterceptRequest(WebView webView, WebResourceRequest request) {
-            WebResourceResponse webResourceResponse = UnLineResManager.getInstance().getRes(Config.TEST_URL, request.getUrl().toString());
+            WebResourceResponse webResourceResponse =
+                    DataRes.getRes(Config.TEST_URL, request.getUrl().toString());
             if (webResourceResponse == null) {
-                UnLineResManager.getInstance().loadRes(Config.TEST_URL, request);
+                DataRes.loadRes(Config.TEST_URL, request.getUrl().toString());
                 webResourceResponse = super.shouldInterceptRequest(webView, request);
             }
             return webResourceResponse;
+//            return super.shouldInterceptRequest(webView, request);
         }
     }
 

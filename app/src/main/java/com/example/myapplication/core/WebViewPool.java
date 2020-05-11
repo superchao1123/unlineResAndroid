@@ -18,7 +18,6 @@ public class WebViewPool {
 
 
     private static Map<String, WebView> mH5WebViewHolder;
-    private static final int maxSize = 2;
     private static volatile WebViewPool instance = null;
     private Context mContext;
     private WebView mAvailableWebView;
@@ -42,9 +41,6 @@ public class WebViewPool {
      * Webview 初始化
      */
     public void init (Application context) {
-        if (context == null) {
-            throw new IllegalStateException("上下文必须为application，且不能为空！");
-        }
         mContext = context;
         mAvailableWebView = new WebView(context);
     }

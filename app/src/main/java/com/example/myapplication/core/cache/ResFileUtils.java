@@ -1,14 +1,13 @@
 package com.example.myapplication.core.cache;
 
+import android.content.Intent;
 import android.net.Uri;
 import android.os.Environment;
 import android.text.TextUtils;
-import android.util.Log;
 
+import com.example.myapplication.core.cs.ResInitService;
 import com.example.myapplication.core.ResLogUtils;
-import com.example.myapplication.core.WebResponseTranslator;
-import com.example.myapplication.core.ResCache;
-import com.tencent.smtt.export.external.interfaces.WebResourceResponse;
+import com.example.myapplication.core.cs.DataRes;
 
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
@@ -27,42 +26,34 @@ import java.util.Set;
 public class ResFileUtils {
 
     private static final String DIST_DIR = Environment.getExternalStorageDirectory().getAbsolutePath().concat("/h5Res/");
-    private static final String HEADER_EXT = ".header";
+    public static final String HEADER_EXT = ".header";
 
 
     /**
      * 判断资源是否存在，存在读到内存
      */
-    public static boolean isResCacheDisk(ResCache resCache) {
-        if (resCache == null || TextUtils.isEmpty(resCache.getH5Url())) {
+    public static boolean isResCacheDisk(String h5Url) {
+        if (TextUtils.isEmpty(h5Url)) {
             return false;
         }
-        File file = new File(getSavePath(resCache.getH5Url()));
+        String resDirPath = getSavePath(h5Url);
+        File file = new File(resDirPath);
         if (file.exists() && file.isDirectory()) {
             File[] files = file.listFiles();
             if (files == null || files.length == 0) {
                 return false;
             }
-            readToHeap(files, resCache);
+            readToHeap(h5Url, resDirPath);
             return true;
         }
         return false;
     }
 
-    private static void readToHeap(File[] files, ResCache resCache) {
-        for (File resFile : files) {
-            if (resFile == null || !resFile.exists() || !resFile.isFile() || resFile.getName().contains(HEADER_EXT)) {
-                continue;
-            }
-            try {
-                String fileName = resFile.getName();
-                WebResourceResponse response = WebResponseTranslator.transform(fileName,
-                        readFileToBytes(resFile), getHeaderFromLocalCache(getResResponseHeaderPath(resCache.getH5Url(), fileName)));
-                resCache.addRes(fileName, response);
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
+    private static void readToHeap(String h5Url, String resDirPath) {
+        Intent intent = new Intent(DataRes.MSG_TYPE_PERFORM_READ_DATA);
+        intent.putExtra("h5Url", h5Url);
+        intent.putExtra("resDirPath",resDirPath);
+        ResInitService.mContext.sendBroadcast(intent);
     }
 
     public static boolean writeFile(String str, String filePath) {
@@ -209,19 +200,19 @@ public class ResFileUtils {
     /**
      * 保存到磁盘
      */
-    public static void writeToDisk (String resUrl, InputStream is, ResCache resCache) {
+    public static void writeToDisk (String resUrl, InputStream is, String h5Url) {
         if(!Environment.getExternalStorageState().equals(Environment.MEDIA_MOUNTED)){
             ResLogUtils.log("sd卡不可用 ！");
             return;
         }
-        if (TextUtils.isEmpty(resUrl) || is == null || resCache == null) {
+        if (TextUtils.isEmpty(resUrl) || is == null || TextUtils.isEmpty(h5Url)) {
             return;
         }
         FileOutputStream fos = null;
         try {
             byte[] buf = new byte[2048];
             int len = 0;
-            String savePath = getSavePath(resCache.getH5Url());
+            String savePath = getSavePath(h5Url);
             File file = new File(savePath, getResDiskName(resUrl));
             fos = new FileOutputStream(file);
             while ((len = is.read(buf)) != -1) {
@@ -229,6 +220,8 @@ public class ResFileUtils {
             }
             fos.flush();
             ResLogUtils.log("download " + resUrl + " success");
+
+            readToHeap(h5Url, savePath);
         } catch (Exception e) {
             e.printStackTrace();
             ResLogUtils.log("download " + resUrl + " failed : " + e.getMessage());
